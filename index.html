@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Present Simple Runner AR</title>
     
-    <!-- MediaPipe dependencies -->
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- MediaPipe dependencies -->
@@ -88,10 +88,13 @@
             pointer-events: none; /* Let clicks pass through to UI if needed */
         }
         
-        #video-element {
-            display: none;
+       #video-element{
+            position:absolute;
+            width:1px;
+            height:1px;
+            opacity:0;
+            pointer-events:none;
         }
-
         /* Loading Spinner */
         .loader {
             border: 8px solid rgba(255,255,255,0.1);
@@ -467,6 +470,8 @@
             questions: [],
             currentQ: null,
             isBonus: false,
+            answerLocked: false,
+            motionTimeoutId: null,
             
             // Interaction State
             cursorX: 0,
@@ -489,11 +494,39 @@
 
         // Resize Canvas to fit screen
         function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+
+            const dpr =
+                window.devicePixelRatio || 1;
+
+            canvas.width =
+                window.innerWidth * dpr;
+
+            canvas.height =
+                window.innerHeight * dpr;
+
+            canvas.style.width =
+                window.innerWidth + "px";
+
+            canvas.style.height =
+                window.innerHeight + "px";
+
+            ctx.setTransform(
+                dpr,
+                0,
+                0,
+                dpr,
+                0,
+                0
+            );
         }
-        window.addEventListener('resize', resizeCanvas);
+
+        window.addEventListener(
+            'resize',
+            resizeCanvas
+        );
+
         resizeCanvas();
+
 
 
         /** =======================================================================
@@ -558,6 +591,15 @@
                 // Initialize Audio Context on user gesture
                 if(audio.ctx.state === 'suspended') audio.ctx.resume();
 
+                if(!isAiReady){
+
+                    alert(
+                        "AI is still loading."
+                    );
+
+                    return;
+                }
+
                 game.start();
             }
         };
@@ -603,8 +645,8 @@
                             await handsAI.send({image: videoElement});
                         }
                     },
-                    width: 640,
-                    height: 480
+                    width: 1280,
+                    height: 720
                 });
                 
                 await camera.start();
@@ -655,11 +697,19 @@
             if (state.motionType === 'raise_right') {
                 // Right wrist (16) must be above Right shoulder (12) and nose (0)
                 // Note: Y is 0 at top.
-                if (marks[16].y < marks[12].y && marks[16].y < marks[0].y) passed = true;
+                if (
+                    marks[16].y <
+                    marks[12].y - 0.10
+                )
+                passed = true;
             } 
             else if (state.motionType === 'raise_left') {
                 // Left wrist (15) above Left shoulder (11) and nose (0)
-                if (marks[15].y < marks[11].y && marks[15].y < marks[0].y) passed = true;
+                if (
+                    marks[15].y <
+                    marks[11].y - 0.10
+                )
+                passed = true;
             }
             else if (state.motionType === 'touch_shoulders') {
                 // Cross arms: Left wrist (15) near Right shoulder (12) AND Right wrist (16) near Left shoulder (11)
@@ -692,7 +742,25 @@
             }, 8000);
         };
 
+        function shuffle(array){
 
+                    for(
+                        let i=array.length-1;
+                        i>0;
+                        i--
+                    ){
+
+                        const j=
+                        Math.floor(
+                            Math.random()*(i+1)
+                        );
+
+                        [array[i],array[j]]=
+                        [array[j],array[i]];
+                    }
+
+                    return array;
+        }
         /** =======================================================================
          *  GAME LOGIC & ENGINE
          *  ======================================================================= */
@@ -704,13 +772,28 @@
             start() {
                 // Filter questions by difficulty
                 const pool = allQuestions.filter(q => settings.difficulties.includes(q.diff));
+                if (
+                    pool.length <
+                    settings.questionCount
+                ){
+
+                    alert(
+                        `Only ${pool.length} questions available for selected difficulty.`
+                    );
+
+                    return;
+                }
+
                 if(pool.length === 0) {
                     alert("Please select at least one difficulty in Teacher Mode.");
                     return;
                 }
 
                 // Shuffle and pick
-                const shuffled = pool.sort(() => 0.5 - Math.random());
+                //const shuffled = pool.sort(() => 0.5 - Math.random());
+                
+                const shuffled =
+                shuffle([...pool]);
                 state.questions = shuffled.slice(0, settings.questionCount);
                 
                 // Reset State
@@ -722,15 +805,25 @@
                 state.wrong = 0;
                 state.timeLeft = settings.gameTime;
                 state.isRunning = true;
+                state.answerLocked = false;
+                
                 
                 ui.showScreen('screen-game');
                 this.updateHUD();
-                
-                // Start Loop & Timer
+
+                // Start Timer
                 this.timerId = setInterval(() => {
+
                     state.timeLeft--;
+
                     this.updateHUD();
-                    if(state.timeLeft <= 0) this.end();
+
+                    if(state.timeLeft <= 0){
+
+                        this.end();
+
+                    }
+
                 }, 1000);
 
                 this.nextQuestion();
@@ -831,6 +924,18 @@
                 document.getElementById('motion-text').innerText = challenge.text;
                 
                 audio.speakQuestion(challenge.text);
+                
+                state.motionTimeoutId =
+                setTimeout(() => {
+
+                    if(state.motionActive){
+
+                        completeMotionChallenge();
+
+                    }
+
+                },10000);
+
             },
 
             showQuestionUI() {
@@ -840,6 +945,9 @@
 
             handleAnswer(selectedIndex) {
                 if(!state.isRunning || state.motionActive) return;
+                if(state.answerLocked) return;
+
+                state.answerLocked = true;
                 
                 resetHover();
                 const isCorrect = (selectedIndex === state.currentQ.a);
@@ -871,11 +979,14 @@
                 }
 
                 this.updateHUD();
-                
-                // Brief pause before next
+
                 setTimeout(() => {
+
+                    state.answerLocked = false;
+
                     this.nextQuestion();
-                }, 1500);
+
+                },1500);
             },
 
             end() {
@@ -906,10 +1017,13 @@
 
                 this.saveScore(accuracy);
                 ui.showScreen('screen-gameover');
+                window.speechSynthesis.cancel();
             },
+            
             
             quit() {
                 this.end();
+                window.speechSynthesis.cancel();
             },
 
             saveScore(accuracy) {
@@ -940,7 +1054,18 @@
                 // Flip context horizontally for mirror effect
                 ctx.translate(canvas.width, 0);
                 ctx.scale(-1, 1);
-                
+                if(
+                    !videoElement.videoWidth ||
+                    !videoElement.videoHeight
+                ){
+
+                    this.loopId =
+                    requestAnimationFrame(
+                        this.renderLoop.bind(this)
+                    );
+
+                    return;
+                }
                 // Draw video filling the canvas (object-fit: cover equivalent in canvas)
                 const videoRatio = videoElement.videoWidth / videoElement.videoHeight;
                 const canvasRatio = canvas.width / canvas.height;
@@ -1006,28 +1131,46 @@
 
             const buttons = document.querySelectorAll('.btn-answer');
             let isHoveringAny = false;
+            document
+            .querySelectorAll('.btn-answer')
+            .forEach(btn =>
+                btn.classList.remove('hovered')
+            );
+            for(const btn of buttons){
 
-            buttons.forEach(btn => {
-                const rect = btn.getBoundingClientRect();
-                
-                // AABB Collision check
-                if (state.cursorX >= rect.left && state.cursorX <= rect.right &&
-                    state.cursorY >= rect.top && state.cursorY <= rect.bottom) {
-                    
+                const rect =
+                btn.getBoundingClientRect();
+
+                if(
+                    state.cursorX >= rect.left &&
+                    state.cursorX <= rect.right &&
+                    state.cursorY >= rect.top &&
+                    state.cursorY <= rect.bottom
+                ){
+
                     isHoveringAny = true;
-                    const index = btn.dataset.index;
 
-                    if (state.hoverElementId !== index) {
-                        // New hover started
-                        state.hoverElementId = index;
-                        state.hoverStartTime = performance.now();
+                    const index =
+                    btn.dataset.index;
+
+                    if(
+                        state.hoverElementId !== index
+                    ){
+
+                        state.hoverElementId =
+                        index;
+
+                        state.hoverStartTime =
+                        performance.now();
+
                         btn.classList.add('hovered');
+
                         audio.hover();
                     }
-                } else {
-                    btn.classList.remove('hovered');
+
+                    return;
                 }
-            });
+            }
 
             if (!isHoveringAny) {
                 resetHover();
@@ -1040,6 +1183,9 @@
         }
 
         function completeMotionChallenge() {
+            clearTimeout(
+                state.motionTimeoutId
+            );
             audio.motion();
             state.motionActive = false;
             document.getElementById('motion-prompt').classList.add('hidden');
