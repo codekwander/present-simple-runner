@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Present Simple Runner AR</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- MediaPipe dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a; /* Tailwind slate-900 */
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            touch-action: none; /* Prevent scroll on touch */
+        }
+
+        .font-display { font-family: 'Orbitron', sans-serif; }
+
+        /* Neon Glow Effects */
+        .neon-box {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(10px);
+            border: 2px solid #06b6d4;
+            box-shadow: 0 0 10px #06b6d4, inset 0 0 10px #06b6d4;
+            border-radius: 1rem;
+        }
+
+        .neon-text {
+            text-shadow: 0 0 5px #a855f7, 0 0 10px #a855f7;
+        }
+        
+        .neon-text-blue {
+            text-shadow: 0 0 5px #06b6d4, 0 0 10px #06b6d4;
+        }
+
+        .btn-neon {
+            background: linear-gradient(45deg, #06b6d4, #3b82f6);
+            border: none;
+            color: white;
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
+            transition: all 0.2s ease;
+        }
+        
+        .btn-neon:hover {
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.8);
+            transform: scale(1.05);
+        }
+
+        .btn-answer {
+            background: rgba(30, 41, 59, 0.9);
+            border: 3px solid #8b5cf6;
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.4);
+            transition: all 0.1s ease;
+        }
+
+        .btn-answer.hovered {
+            background: rgba(139, 92, 246, 0.5);
+            border-color: #c4b5fd;
+            box-shadow: 0 0 30px rgba(139, 92, 246, 0.8);
+            transform: scale(1.05);
+        }
+
+        /* Screen Management */
+        .screen { display: none; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 10; flex-direction: column; }
+        .screen.active { display: flex; }
+
+        /* Canvas Overlay */
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 5;
+            pointer-events: none; /* Let clicks pass through to UI if needed */
+        }
+        
+        #video-element {
+            display: none;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 8px solid rgba(255,255,255,0.1);
+            border-top: 8px solid #06b6d4;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Animations */
+        @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .animate-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        
+        @keyframes flash-green { 0% { background: rgba(34, 197, 94, 0.5); } 100% { background: transparent; } }
+        @keyframes flash-red { 0% { background: rgba(239, 68, 68, 0.5); } 100% { background: transparent; } }
+        .flash-correct { animation: flash-green 0.5s ease; }
+        .flash-wrong { animation: flash-red 0.5s ease; }
+
+    </style>
+</head>
+<body>
+
+    <!-- Hidden Video Element for MediaPipe -->
+    <video id="video-element" autoplay playsinline></video>
+    
+    <!-- Main Render Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- UI Overlay Container -->
+    <div id="ui-layer" class="w-full h-full absolute top-0 left-0 pointer-events-none">
+        
+        <!-- LOADING SCREEN -->
+        <div id="screen-loading" class="screen active justify-center items-center bg-slate-900 pointer-events-auto">
+            <h1 class="font-display text-4xl md:text-6xl text-center mb-8 neon-text-blue animate-pulse">Present Simple<br>Runner AR</h1>
+            <div class="loader mb-4"></div>
+            <p id="loading-text" class="text-xl text-gray-300">Initializing AI Models...</p>
+        </div>
+
+        <!-- MAIN MENU -->
+        <div id="screen-menu" class="screen justify-center items-center bg-slate-900/80 backdrop-blur-sm pointer-events-auto">
+            <div class="neon-box p-8 md:p-12 text-center max-w-lg w-[90%] flex flex-col items-center gap-6 animate-pop">
+                <h1 class="font-display text-4xl md:text-5xl neon-text mb-2">AR Grammar Game</h1>
+                
+                <div class="w-full">
+                    <label class="block text-sm text-gray-300 mb-2">Enter Player Name</label>
+                    <input type="text" id="player-name" placeholder="Player 1" class="w-full bg-slate-800 border border-cyan-500 rounded-lg p-3 text-center text-xl text-white outline-none focus:border-purple-500 transition-colors">
+                </div>
+
+                <button onclick="ui.startGame()" class="btn-neon font-display text-2xl px-12 py-4 rounded-full w-full uppercase tracking-wider font-bold">Start Game</button>
+                
+                <div class="grid grid-cols-2 gap-4 w-full mt-4">
+                    <button onclick="ui.showScreen('screen-teacher')" class="bg-slate-700 hover:bg-slate-600 border border-slate-500 px-4 py-3 rounded-lg font-semibold transition-colors">⚙️ Teacher Mode</button>
+                    <button onclick="ui.showLeaderboard()" class="bg-slate-700 hover:bg-slate-600 border border-slate-500 px-4 py-3 rounded-lg font-semibold transition-colors">🏆 Leaderboard</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TEACHER MODE SETTINGS -->
+        <div id="screen-teacher" class="screen justify-center items-center bg-slate-900/90 pointer-events-auto">
+            <div class="neon-box p-6 md:p-8 max-w-2xl w-[95%] max-h-[90vh] overflow-y-auto animate-pop">
+                <h2 class="font-display text-3xl neon-text-blue mb-6 text-center">Teacher Mode Settings</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- General Settings -->
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm mb-1">Game Time (Seconds)</label>
+                            <input type="number" id="set-time" value="60" class="w-full bg-slate-800 border border-gray-600 rounded p-2 text-white">
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">Questions per Game</label>
+                            <input type="number" id="set-qcount" value="10" class="w-full bg-slate-800 border border-gray-600 rounded p-2 text-white">
+                        </div>
+                        <div class="flex items-center justify-between bg-slate-800 p-3 rounded border border-gray-600">
+                            <span>Bonus Round Active</span>
+                            <input type="checkbox" id="set-bonus" checked class="w-6 h-6">
+                        </div>
+                    </div>
+
+                    <!-- Modes & Difficulty -->
+                    <div class="space-y-4">
+                        <div class="flex items-center justify-between bg-slate-800 p-3 rounded border border-gray-600">
+                            <span>Voice Reading (Web Speech)</span>
+                            <input type="checkbox" id="set-voice" checked class="w-6 h-6">
+                        </div>
+                        <div class="flex items-center justify-between bg-slate-800 p-3 rounded border border-gray-600">
+                            <div>
+                                <span class="block">Listening Challenge Mode</span>
+                                <span class="text-xs text-gray-400">Hides question text</span>
+                            </div>
+                            <input type="checkbox" id="set-listening" class="w-6 h-6">
+                        </div>
+                        <div class="flex items-center justify-between bg-slate-800 p-3 rounded border border-gray-600">
+                            <span>Motion Challenge (Poses)</span>
+                            <input type="checkbox" id="set-motion" checked class="w-6 h-6">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 border-t border-gray-600 pt-4">
+                    <label class="block text-sm mb-2 text-center">Allowed Difficulties</label>
+                    <div class="flex justify-center gap-4 flex-wrap">
+                        <label class="flex items-center gap-2"><input type="checkbox" id="diff-easy" checked> Easy</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" id="diff-medium" checked> Medium</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" id="diff-hard" checked> Hard</label>
+                        <label class="flex items-center gap-2"><input type="checkbox" id="diff-expert" checked> Expert</label>
+                    </div>
+                </div>
+
+                <div class="mt-8 flex gap-4">
+                    <button onclick="ui.saveSettings()" class="flex-1 btn-neon py-3 rounded-lg font-bold">Save & Back</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- LEADERBOARD -->
+        <div id="screen-leaderboard" class="screen justify-center items-center bg-slate-900/90 pointer-events-auto">
+            <div class="neon-box p-6 md:p-8 max-w-md w-[95%] animate-pop">
+                <h2 class="font-display text-3xl neon-text mb-6 text-center">Top 10 Leaders</h2>
+                
+                <div class="bg-slate-800 rounded-lg p-2 min-h-[250px] max-h-[50vh] overflow-y-auto mb-6">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-slate-600 text-cyan-400 text-sm">
+                                <th class="p-2">Rank</th>
+                                <th class="p-2">Name</th>
+                                <th class="p-2 text-right">Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="leaderboard-body">
+                            <!-- Injected via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <button onclick="ui.showScreen('screen-menu')" class="w-full bg-slate-700 hover:bg-slate-600 py-3 rounded-lg font-bold transition-colors">Back to Menu</button>
+            </div>
+        </div>
+
+        <!-- GAME UI OVERLAY -->
+        <div id="screen-game" class="screen justify-between py-4 px-2 md:px-8 pointer-events-none">
+            <!-- Top HUD -->
+            <div class="flex justify-between items-start w-full">
+                <div class="neon-box p-3 px-6 pointer-events-auto flex flex-col items-center">
+                    <span class="text-sm text-gray-400">TIME</span>
+                    <span id="hud-time" class="font-display text-3xl md:text-4xl font-bold text-white">60</span>
+                </div>
+                
+                <div class="flex flex-col items-center">
+                    <div id="hud-streak-container" class="hidden mb-2 pointer-events-auto">
+                        <span class="bg-orange-500/80 text-white px-3 py-1 rounded-full text-sm font-bold animate-bounce">🔥 <span id="hud-streak">3</span> Streak!</span>
+                    </div>
+                    <div id="hud-bonus-alert" class="hidden font-display text-xl text-yellow-300 animate-pulse pointer-events-auto text-shadow">
+                        ⭐ BONUS ROUND ⭐
+                    </div>
+                </div>
+
+                <div class="neon-box p-3 px-6 pointer-events-auto flex flex-col items-center">
+                    <span class="text-sm text-gray-400">SCORE</span>
+                    <span id="hud-score" class="font-display text-3xl md:text-4xl font-bold text-cyan-400">0</span>
+                </div>
+            </div>
+
+            <!-- Central Question Area -->
+            <div class="flex-1 flex flex-col justify-center items-center pointer-events-none w-full">
+                
+                <!-- Motion Challenge Prompt -->
+                <div id="motion-prompt" class="hidden absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 neon-box p-8 text-center animate-pop bg-purple-900/80 border-purple-400 z-50">
+                    <h2 class="text-2xl text-purple-200 mb-2">Motion Challenge!</h2>
+                    <p id="motion-text" class="font-display text-4xl text-white"></p>
+                    <div class="w-full bg-slate-800 h-2 mt-4 rounded overflow-hidden">
+                        <div id="motion-progress" class="bg-green-400 h-full w-0 transition-all"></div>
+                    </div>
+                </div>
+
+                <!-- Question Text -->
+                <div id="question-container" class="neon-box p-6 md:p-8 mb-8 text-center max-w-3xl w-full pointer-events-auto shadow-2xl bg-slate-900/85">
+                    <div class="flex justify-between items-center mb-4">
+                        <span id="q-difficulty" class="text-xs uppercase tracking-widest px-2 py-1 rounded bg-slate-700 text-gray-300">Easy</span>
+                        <span id="q-counter" class="text-sm text-gray-400">1 / 10</span>
+                    </div>
+                    <h2 id="q-text" class="text-3xl md:text-5xl font-bold leading-tight mb-4 text-white">He _____ soccer.</h2>
+                    
+                    <button id="btn-read-again" onclick="audio.speakQuestion()" class="hidden bg-slate-700 hover:bg-slate-600 rounded-full p-3 mx-auto mt-2 transition-colors">
+                        🔊 Read Again
+                    </button>
+                </div>
+
+                <!-- Answer Choices (DOM elements for collision detection) -->
+                <div id="choices-container" class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl pointer-events-auto">
+                    <!-- Injected via JS -->
+                </div>
+            </div>
+            
+            <!-- Bottom Controls -->
+            <div class="w-full flex justify-end pointer-events-auto">
+                <button onclick="game.quit()" class="bg-red-500/80 hover:bg-red-500 text-white px-4 py-2 rounded-lg font-bold">Quit Game</button>
+            </div>
+        </div>
+
+        <!-- GAME OVER SCREEN -->
+        <div id="screen-gameover" class="screen justify-center items-center bg-slate-900/95 pointer-events-auto">
+            <div class="neon-box p-8 max-w-md w-[95%] text-center animate-pop">
+                <h2 class="font-display text-4xl neon-text mb-2">Game Summary</h2>
+                <h3 id="summary-level" class="text-2xl text-yellow-400 font-bold mb-6">Grammar Master</h3>
+                
+                <div class="bg-slate-800 rounded-xl p-4 mb-6 space-y-3 text-left">
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400">Total Score</span>
+                        <span id="summary-score" class="font-display text-3xl text-cyan-400">0</span>
+                    </div>
+                    <div class="h-px bg-slate-600 w-full"></div>
+                    <div class="flex justify-between text-lg">
+                        <span>✅ Correct</span>
+                        <span id="summary-correct" class="text-green-400">0</span>
+                    </div>
+                    <div class="flex justify-between text-lg">
+                        <span>❌ Wrong</span>
+                        <span id="summary-wrong" class="text-red-400">0</span>
+                    </div>
+                    <div class="flex justify-between text-lg">
+                        <span>🎯 Accuracy</span>
+                        <span id="summary-accuracy" class="text-purple-400">0%</span>
+                    </div>
+                    <div class="flex justify-between text-lg">
+                        <span>⚡ Best Streak</span>
+                        <span id="summary-streak" class="text-orange-400">0</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-4">
+                    <button onclick="ui.showScreen('screen-menu')" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-lg font-bold">Main Menu</button>
+                    <button onclick="ui.startGame()" class="flex-1 btn-neon py-3 rounded-lg font-bold">Play Again</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        /** =======================================================================
+         *  CUSTOM AUDIO SYNTHESIZER (No external files needed)
+         *  ======================================================================= */
+        class SoundEngine {
+            constructor() {
+                this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                this.enabled = true;
+            }
+
+            playTone(freq, type, duration, vol=0.1, slideFreq=null) {
+                if(!this.enabled || this.ctx.state === 'suspended') return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                
+                if (slideFreq) {
+                    osc.frequency.exponentialRampToValueAtTime(slideFreq, this.ctx.currentTime + duration);
+                }
+
+                gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + duration);
+            }
+
+            hover()   { this.playTone(400, 'sine', 0.1, 0.05); }
+            correct() { 
+                this.playTone(523.25, 'sine', 0.1, 0.1); 
+                setTimeout(()=>this.playTone(659.25, 'sine', 0.2, 0.1), 100); 
+            }
+            wrong()   { this.playTone(150, 'sawtooth', 0.3, 0.1, 100); }
+            bonus()   { 
+                this.playTone(440, 'square', 0.1, 0.1, 880);
+                setTimeout(()=>this.playTone(880, 'square', 0.2, 0.1, 1760), 100);
+            }
+            motion()  { this.playTone(880, 'sine', 0.2, 0.1); }
+            
+            speakQuestion(text) {
+                if ('speechSynthesis' in window) {
+                    window.speechSynthesis.cancel();
+                    const utterance = new SpeechSynthesisUtterance(text);
+                    utterance.lang = 'en-US';
+                    utterance.rate = 0.9; // Slightly slower for clarity
+                    window.speechSynthesis.speak(utterance);
+                }
+            }
+        }
+        const audio = new SoundEngine();
+
+        /** =======================================================================
+         *  QUESTION BANK (Present Simple Tense)
+         *  ======================================================================= */
+        const allQuestions = [
+            // EASY (Subject-Verb agreement basics)
+            { q: "He _____ soccer every weekend.", choices: ["play", "plays", "playing"], a: 1, diff: "easy" },
+            { q: "I _____ apple juice.", choices: ["likes", "like", "liking"], a: 1, diff: "easy" },
+            { q: "They _____ in London.", choices: ["lives", "living", "live"], a: 2, diff: "easy" },
+            { q: "She _____ a book before bed.", choices: ["read", "reads", "reading"], a: 1, diff: "easy" },
+            { q: "We _____ to school by bus.", choices: ["go", "goes", "going"], a: 0, diff: "easy" },
+            { q: "It _____ a lot in winter.", choices: ["rain", "raining", "rains"], a: 2, diff: "easy" },
+            { q: "You _____ very fast.", choices: ["runs", "run", "ran"], a: 1, diff: "easy" },
+            { q: "My cat _____ all day.", choices: ["sleeps", "sleep", "sleeping"], a: 0, diff: "easy" },
+            { q: "The birds _____ in the tree.", choices: ["sings", "sing", "singing"], a: 1, diff: "easy" },
+            { q: "John _____ breakfast at 7 AM.", choices: ["eat", "eating", "eats"], a: 2, diff: "easy" },
+            
+            // MEDIUM (Negatives, spelling changes -es, -ies)
+            { q: "She _____ to school on Sunday.", choices: ["don't go", "doesn't goes", "doesn't go"], a: 2, diff: "medium" },
+            { q: "He _____ hard for exams.", choices: ["study", "studies", "studys"], a: 1, diff: "medium" },
+            { q: "My mother _____ TV in the evening.", choices: ["watch", "watches", "watchs"], a: 1, diff: "medium" },
+            { q: "They _____ like spicy food.", choices: ["don't", "doesn't", "aren't"], a: 0, diff: "medium" },
+            { q: "The baby _____ when he is hungry.", choices: ["cry", "crys", "cries"], a: 2, diff: "medium" },
+            { q: "Sarah _____ her hair every morning.", choices: ["brushes", "brush", "brushs"], a: 0, diff: "medium" },
+            { q: "We _____ work on weekends.", choices: ["doesn't", "don't", "isn't"], a: 1, diff: "medium" },
+            { q: "The mechanic _____ cars.", choices: ["fix", "fixs", "fixes"], a: 2, diff: "medium" },
+            { q: "He _____ his hands before eating.", choices: ["washs", "washes", "wash"], a: 1, diff: "medium" },
+            { q: "I _____ play tennis well.", choices: ["doesn't", "not", "don't"], a: 2, diff: "medium" },
+
+            // HARD (Questions - Do/Does, Adverbs of frequency)
+            { q: "_____ she like pop music?", choices: ["Do", "Does", "Is"], a: 1, diff: "hard" },
+            { q: "_____ you know the answer?", choices: ["Are", "Does", "Do"], a: 2, diff: "hard" },
+            { q: "Where _____ he live?", choices: ["do", "does", "is"], a: 1, diff: "hard" },
+            { q: "He _____ late for work.", choices: ["never is", "is never", "does never"], a: 1, diff: "hard" }, // Exception rule
+            { q: "I _____ go to the cinema.", choices: ["always", "always go", "go always"], a: 0, diff: "hard" },
+            { q: "_____ they speak Spanish?", choices: ["Do", "Are", "Does"], a: 0, diff: "hard" },
+            { q: "What time _____ the train leave?", choices: ["do", "is", "does"], a: 2, diff: "hard" },
+            { q: "She _____ her homework after dinner.", choices: ["usually does", "does usually", "usually do"], a: 0, diff: "hard" },
+            { q: "Why _____ you want to learn English?", choices: ["are", "do", "does"], a: 1, diff: "hard" },
+            { q: "_____ your brother play guitar?", choices: ["Do", "Does", "Is"], a: 1, diff: "hard" },
+
+            // EXPERT (Complex subjects, exceptions, tricky negatives)
+            { q: "The dog and the cat _____ in the garden.", choices: ["plays", "play", "playing"], a: 1, diff: "expert" },
+            { q: "Neither he nor she _____ the truth.", choices: ["knows", "know", "knowing"], a: 0, diff: "expert" },
+            { q: "Everyone _____ to be happy.", choices: ["want", "wants", "wanting"], a: 1, diff: "expert" },
+            { q: "My boss, together with his wife, _____ coming.", choices: ["are", "is", "do"], a: 1, diff: "expert" },
+            { q: "He _____ any brothers or sisters.", choices: ["hasn't", "doesn't have", "don't have"], a: 1, diff: "expert" },
+            { q: "The scissors _____ on the table.", choices: ["is", "are", "does"], a: 1, diff: "expert" },
+            { q: "Physics _____ a difficult subject.", choices: ["are", "is", "do"], a: 1, diff: "expert" },
+            { q: "How often _____ she go to the gym?", choices: ["does", "do", "is"], a: 0, diff: "expert" },
+            { q: "A lot of people _____ English.", choices: ["speaks", "speak", "speaking"], a: 1, diff: "expert" },
+            { q: "The news _____ good today.", choices: ["are", "is", "does"], a: 1, diff: "expert" }
+        ];
+
+        /** =======================================================================
+         *  GLOBAL STATE & SETTINGS
+         *  ======================================================================= */
+        const settings = {
+            gameTime: 60,
+            questionCount: 10,
+            bonusEnabled: true,
+            voiceEnabled: true,
+            listeningMode: false,
+            motionEnabled: true,
+            difficulties: ['easy', 'medium', 'hard', 'expert']
+        };
+
+        const state = {
+            isRunning: false,
+            playerName: "Player 1",
+            score: 0,
+            timeLeft: 0,
+            qIndex: 0,
+            streak: 0,
+            bestStreak: 0,
+            correct: 0,
+            wrong: 0,
+            questions: [],
+            currentQ: null,
+            isBonus: false,
+            
+            // Interaction State
+            cursorX: 0,
+            cursorY: 0,
+            hoverElementId: null,
+            hoverStartTime: 0,
+            hoverDurationNeeded: 1000, // 1 second hover to click
+            
+            // Motion Challenge State
+            motionActive: false,
+            motionType: null, // 'raise_right', 'raise_left', 'touch_shoulders'
+            motionProgress: 0
+        };
+
+        // DOM Elements
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('video-element');
+        const uiLayer = document.getElementById('ui-layer');
+
+        // Resize Canvas to fit screen
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+
+        /** =======================================================================
+         *  UI MANAGER
+         *  ======================================================================= */
+        const ui = {
+            screens: ['screen-loading', 'screen-menu', 'screen-teacher', 'screen-leaderboard', 'screen-game', 'screen-gameover'],
+            
+            showScreen(id) {
+                this.screens.forEach(s => document.getElementById(s).classList.remove('active'));
+                document.getElementById(id).classList.add('active');
+            },
+
+            saveSettings() {
+                settings.gameTime = parseInt(document.getElementById('set-time').value) || 60;
+                settings.questionCount = parseInt(document.getElementById('set-qcount').value) || 10;
+                settings.bonusEnabled = document.getElementById('set-bonus').checked;
+                settings.voiceEnabled = document.getElementById('set-voice').checked;
+                settings.listeningMode = document.getElementById('set-listening').checked;
+                settings.motionEnabled = document.getElementById('set-motion').checked;
+
+                settings.difficulties = [];
+                if(document.getElementById('diff-easy').checked) settings.difficulties.push('easy');
+                if(document.getElementById('diff-medium').checked) settings.difficulties.push('medium');
+                if(document.getElementById('diff-hard').checked) settings.difficulties.push('hard');
+                if(document.getElementById('diff-expert').checked) settings.difficulties.push('expert');
+                
+                if(settings.difficulties.length === 0) {
+                    settings.difficulties.push('easy'); // fallback
+                    document.getElementById('diff-easy').checked = true;
+                }
+                
+                this.showScreen('screen-menu');
+            },
+
+            showLeaderboard() {
+                const lb = JSON.parse(localStorage.getItem('psRunner_leaderboard') || '[]');
+                const tbody = document.getElementById('leaderboard-body');
+                tbody.innerHTML = '';
+                
+                if (lb.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400">No records yet.</td></tr>';
+                } else {
+                    lb.forEach((entry, idx) => {
+                        const tr = document.createElement('tr');
+                        tr.className = 'border-b border-slate-700/50';
+                        tr.innerHTML = `
+                            <td class="p-2 text-gray-300">#${idx + 1}</td>
+                            <td class="p-2 font-bold text-white">${entry.name}</td>
+                            <td class="p-2 text-right font-display text-cyan-400">${entry.score}</td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+                this.showScreen('screen-leaderboard');
+            },
+
+            startGame() {
+                const nameInput = document.getElementById('player-name').value.trim();
+                if(nameInput) state.playerName = nameInput;
+                
+                // Initialize Audio Context on user gesture
+                if(audio.ctx.state === 'suspended') audio.ctx.resume();
+
+                game.start();
+            }
+        };
+
+
+        /** =======================================================================
+         *  AI TRACKING (MediaPipe Setup)
+         *  ======================================================================= */
+        let handsAI, poseAI, camera;
+        let isAiReady = false;
+
+        async function initAI() {
+            try {
+                // Initialize Hands
+                handsAI = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                handsAI.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+                handsAI.onResults(onHandResults);
+
+                // Initialize Pose
+                poseAI = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+                poseAI.setOptions({
+                    modelComplexity: 0, // 0 for better performance on web
+                    smoothLandmarks: true,
+                    minDetectionConfidence: 0.5,
+                    minTrackingConfidence: 0.5
+                });
+                poseAI.onResults(onPoseResults);
+
+                // Request Camera Access
+                camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        if(!state.isRunning) return; // Save processing when not playing
+                        
+                        // Performance trick: Run pose only when needed, hands otherwise
+                        if (state.motionActive) {
+                            await poseAI.send({image: videoElement});
+                        } else {
+                            await handsAI.send({image: videoElement});
+                        }
+                    },
+                    width: 640,
+                    height: 480
+                });
+                
+                await camera.start();
+                isAiReady = true;
+                ui.showScreen('screen-menu');
+                
+            } catch (error) {
+                console.error("Camera/AI Init Error:", error);
+                document.getElementById('loading-text').innerHTML = 
+                    "<span class='text-red-500'>Camera access denied or error loading AI.<br>Please allow camera permissions and reload.</span>";
+            }
+        }
+
+        function onHandResults(results) {
+            if(!state.isRunning || state.motionActive) return;
+
+            // Reset interaction state if no hands
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                state.cursorX = -1;
+                state.cursorY = -1;
+                resetHover();
+                return;
+            }
+
+            // Get index finger tip (landmark 8) of the first detected hand
+            const indexFinger = results.multiHandLandmarks[0][8];
+            
+            // Map normalized coordinates (0-1) to screen space. 
+            // Note: Webcam is mirrored naturally, so we flip X.
+            state.cursorX = (1 - indexFinger.x) * canvas.width;
+            state.cursorY = indexFinger.y * canvas.height;
+
+            checkCollisions();
+        }
+
+        function onPoseResults(results) {
+            if(!state.isRunning || !state.motionActive) return;
+            
+            if(!results.poseLandmarks) return;
+            const marks = results.poseLandmarks;
+
+            // MediaPipe Pose landmarks:
+            // 11: Left Shoulder, 12: Right Shoulder
+            // 15: Left Wrist, 16: Right Wrist
+            
+            let passed = false;
+
+            if (state.motionType === 'raise_right') {
+                // Right wrist (16) must be above Right shoulder (12) and nose (0)
+                // Note: Y is 0 at top.
+                if (marks[16].y < marks[12].y && marks[16].y < marks[0].y) passed = true;
+            } 
+            else if (state.motionType === 'raise_left') {
+                // Left wrist (15) above Left shoulder (11) and nose (0)
+                if (marks[15].y < marks[11].y && marks[15].y < marks[0].y) passed = true;
+            }
+            else if (state.motionType === 'touch_shoulders') {
+                // Cross arms: Left wrist (15) near Right shoulder (12) AND Right wrist (16) near Left shoulder (11)
+                const dist1 = Math.hypot(marks[15].x - marks[12].x, marks[15].y - marks[12].y);
+                const dist2 = Math.hypot(marks[16].x - marks[11].x, marks[16].y - marks[11].y);
+                if (dist1 < 0.2 && dist2 < 0.2) passed = true; // normalized distance threshold
+            }
+
+            if (passed) {
+                state.motionProgress += 0.05; // Requires holding pose slightly
+                if (state.motionProgress >= 1) {
+                    completeMotionChallenge();
+                }
+            } else {
+                state.motionProgress = Math.max(0, state.motionProgress - 0.02);
+            }
+
+            // Update UI progress bar
+            document.getElementById('motion-progress').style.width = `${state.motionProgress * 100}%`;
+        }
+
+        // Start initialization on load
+        window.onload = () => {
+            initAI();
+            // Fallback if camera takes too long
+            setTimeout(()=>{
+                if(!isAiReady && document.getElementById('screen-loading').classList.contains('active')){
+                    document.getElementById('loading-text').innerText = "Loading is taking longer than expected. Check camera permissions.";
+                }
+            }, 8000);
+        };
+
+
+        /** =======================================================================
+         *  GAME LOGIC & ENGINE
+         *  ======================================================================= */
+        const game = {
+            loopId: null,
+            timerId: null,
+            lastFrameTime: 0,
+
+            start() {
+                // Filter questions by difficulty
+                const pool = allQuestions.filter(q => settings.difficulties.includes(q.diff));
+                if(pool.length === 0) {
+                    alert("Please select at least one difficulty in Teacher Mode.");
+                    return;
+                }
+
+                // Shuffle and pick
+                const shuffled = pool.sort(() => 0.5 - Math.random());
+                state.questions = shuffled.slice(0, settings.questionCount);
+                
+                // Reset State
+                state.score = 0;
+                state.qIndex = 0;
+                state.streak = 0;
+                state.bestStreak = 0;
+                state.correct = 0;
+                state.wrong = 0;
+                state.timeLeft = settings.gameTime;
+                state.isRunning = true;
+                
+                ui.showScreen('screen-game');
+                this.updateHUD();
+                
+                // Start Loop & Timer
+                this.timerId = setInterval(() => {
+                    state.timeLeft--;
+                    this.updateHUD();
+                    if(state.timeLeft <= 0) this.end();
+                }, 1000);
+
+                this.nextQuestion();
+                this.renderLoop();
+            },
+
+            updateHUD() {
+                document.getElementById('hud-time').innerText = state.timeLeft;
+                document.getElementById('hud-score').innerText = state.score;
+                
+                const streakEl = document.getElementById('hud-streak-container');
+                if (state.streak >= 3) {
+                    streakEl.classList.remove('hidden');
+                    document.getElementById('hud-streak').innerText = state.streak;
+                } else {
+                    streakEl.classList.add('hidden');
+                }
+            },
+
+            nextQuestion() {
+                if (state.qIndex >= state.questions.length) {
+                    this.end();
+                    return;
+                }
+
+                state.currentQ = state.questions[state.qIndex];
+                state.qIndex++;
+                
+                // Bonus Round Logic
+                state.isBonus = (settings.bonusEnabled && state.qIndex % 5 === 0);
+                const bonusAlert = document.getElementById('hud-bonus-alert');
+                if (state.isBonus) {
+                    bonusAlert.classList.remove('hidden');
+                    audio.bonus();
+                } else {
+                    bonusAlert.classList.add('hidden');
+                }
+
+                // Setup UI
+                document.getElementById('q-difficulty').innerText = state.currentQ.diff;
+                document.getElementById('q-counter').innerText = `${state.qIndex} / ${state.questions.length}`;
+                
+                const qTextEl = document.getElementById('q-text');
+                const readBtn = document.getElementById('btn-read-again');
+                
+                if (settings.listeningMode) {
+                    qTextEl.innerText = "🎧 Listen carefully...";
+                    readBtn.classList.remove('hidden');
+                } else {
+                    qTextEl.innerText = state.currentQ.q;
+                    readBtn.classList.add('hidden');
+                }
+
+                // Render Choices
+                const choicesContainer = document.getElementById('choices-container');
+                choicesContainer.innerHTML = '';
+                
+                state.currentQ.choices.forEach((choice, index) => {
+                    const btn = document.createElement('div');
+                    btn.className = 'btn-answer flex items-center justify-center p-6 rounded-xl cursor-pointer';
+                    btn.dataset.index = index;
+                    // Add an internal span for the text to allow easy styling
+                    btn.innerHTML = `<span class="font-display text-2xl md:text-3xl text-white pointer-events-none">${choice}</span>`;
+                    choicesContainer.appendChild(btn);
+                });
+
+                // Voice reading
+                if (settings.voiceEnabled || settings.listeningMode) {
+                    let textToSpeak = state.currentQ.q.replace('_____', 'blank');
+                    audio.speakQuestion(textToSpeak);
+                }
+
+                // Random Motion Challenge (30% chance if enabled, but not on bonus rounds to keep flow fast)
+                if (settings.motionEnabled && !state.isBonus && Math.random() < 0.3) {
+                    this.triggerMotionChallenge();
+                } else {
+                    this.showQuestionUI();
+                }
+            },
+
+            triggerMotionChallenge() {
+                state.motionActive = true;
+                state.motionProgress = 0;
+                
+                // Hide question, show prompt
+                document.getElementById('question-container').style.opacity = '0';
+                document.getElementById('choices-container').style.opacity = '0';
+                document.getElementById('motion-prompt').classList.remove('hidden');
+
+                const challenges = [
+                    { type: 'raise_right', text: 'Raise Right Hand!' },
+                    { type: 'raise_left', text: 'Raise Left Hand!' },
+                    { type: 'touch_shoulders', text: 'Cross Arms (Touch Shoulders)!' }
+                ];
+                
+                const challenge = challenges[Math.floor(Math.random() * challenges.length)];
+                state.motionType = challenge.type;
+                document.getElementById('motion-text').innerText = challenge.text;
+                
+                audio.speakQuestion(challenge.text);
+            },
+
+            showQuestionUI() {
+                document.getElementById('question-container').style.opacity = '1';
+                document.getElementById('choices-container').style.opacity = '1';
+            },
+
+            handleAnswer(selectedIndex) {
+                if(!state.isRunning || state.motionActive) return;
+                
+                resetHover();
+                const isCorrect = (selectedIndex === state.currentQ.a);
+                const buttons = document.querySelectorAll('.btn-answer');
+                const selectedBtn = buttons[selectedIndex];
+                
+                if (isCorrect) {
+                    audio.correct();
+                    selectedBtn.classList.add('flash-correct', 'bg-green-600', 'border-green-400');
+                    
+                    let points = 10;
+                    if (state.isBonus) points += 40; // Total 50
+                    
+                    state.streak++;
+                    if(state.streak > state.bestStreak) state.bestStreak = state.streak;
+                    if(state.streak % 3 === 0) points += 50; // Streak bonus
+                    
+                    state.score += points;
+                    state.correct++;
+                } else {
+                    audio.wrong();
+                    selectedBtn.classList.add('flash-wrong', 'bg-red-600', 'border-red-400');
+                    // Highlight correct answer
+                    buttons[state.currentQ.a].classList.add('border-green-400', 'border-4');
+                    
+                    state.score = Math.max(0, state.score - 5);
+                    state.streak = 0;
+                    state.wrong++;
+                }
+
+                this.updateHUD();
+                
+                // Brief pause before next
+                setTimeout(() => {
+                    this.nextQuestion();
+                }, 1500);
+            },
+
+            end() {
+                state.isRunning = false;
+                clearInterval(this.timerId);
+                cancelAnimationFrame(this.loopId);
+                ctx.clearRect(0, 0, canvas.width, canvas.height); // clear canvas
+
+                // Calculate stats
+                const totalAttempted = state.correct + state.wrong;
+                const accuracy = totalAttempted === 0 ? 0 : Math.round((state.correct / totalAttempted) * 100);
+                
+                let level = "Beginner";
+                let levelColor = "text-gray-400";
+                if (accuracy >= 90) { level = "Grammar Master 👑"; levelColor = "text-yellow-400"; }
+                else if (accuracy >= 75) { level = "Grammar Expert 🎓"; levelColor = "text-purple-400"; }
+                else if (accuracy >= 60) { level = "Intermediate 👍"; levelColor = "text-blue-400"; }
+
+                document.getElementById('summary-score').innerText = state.score;
+                document.getElementById('summary-correct').innerText = state.correct;
+                document.getElementById('summary-wrong').innerText = state.wrong;
+                document.getElementById('summary-accuracy').innerText = `${accuracy}%`;
+                document.getElementById('summary-streak').innerText = state.bestStreak;
+                
+                const lvlEl = document.getElementById('summary-level');
+                lvlEl.innerText = level;
+                lvlEl.className = `text-2xl font-bold mb-6 ${levelColor}`;
+
+                this.saveScore(accuracy);
+                ui.showScreen('screen-gameover');
+            },
+            
+            quit() {
+                this.end();
+            },
+
+            saveScore(accuracy) {
+                if (state.score === 0) return; // Don't save 0 scores
+                let lb = JSON.parse(localStorage.getItem('psRunner_leaderboard') || '[]');
+                lb.push({
+                    name: state.playerName,
+                    score: state.score,
+                    accuracy: accuracy,
+                    date: new Date().toLocaleDateString()
+                });
+                
+                // Sort descending by score
+                lb.sort((a, b) => b.score - a.score);
+                // Keep top 10
+                lb = lb.slice(0, 10);
+                
+                localStorage.setItem('psRunner_leaderboard', JSON.stringify(lb));
+            },
+
+            renderLoop(timestamp) {
+                if(!state.isRunning) return;
+
+                // 1. Draw Video to Canvas (Mirrored)
+                ctx.save();
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Flip context horizontally for mirror effect
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                
+                // Draw video filling the canvas (object-fit: cover equivalent in canvas)
+                const videoRatio = videoElement.videoWidth / videoElement.videoHeight;
+                const canvasRatio = canvas.width / canvas.height;
+                let drawWidth, drawHeight, startX, startY;
+
+                if (canvasRatio > videoRatio) {
+                    drawWidth = canvas.width;
+                    drawHeight = canvas.width / videoRatio;
+                    startX = 0;
+                    startY = (canvas.height - drawHeight) / 2;
+                } else {
+                    drawWidth = canvas.height * videoRatio;
+                    drawHeight = canvas.height;
+                    startX = (canvas.width - drawWidth) / 2;
+                    startY = 0;
+                }
+                
+                // Darken video slightly for better UI contrast
+                ctx.drawImage(videoElement, startX, startY, drawWidth, drawHeight);
+                ctx.fillStyle = 'rgba(15, 23, 42, 0.5)'; // Tailwind slate-900 with opacity
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+
+                // 2. Draw Interaction layer (Progress Ring & Cursor)
+                if (!state.motionActive && state.cursorX > 0) {
+                    // Draw Cursor Dot
+                    ctx.beginPath();
+                    ctx.arc(state.cursorX, state.cursorY, 15, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#06b6d4'; // Cyan
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Draw Progress Ring if hovering
+                    if (state.hoverElementId !== null) {
+                        const elapsed = timestamp - state.hoverStartTime;
+                        const progress = Math.min(elapsed / state.hoverDurationNeeded, 1);
+                        
+                        ctx.beginPath();
+                        ctx.arc(state.cursorX, state.cursorY, 30, -Math.PI / 2, (-Math.PI / 2) + (progress * 2 * Math.PI));
+                        ctx.strokeStyle = '#a855f7'; // Purple
+                        ctx.lineWidth = 6;
+                        ctx.lineCap = 'round';
+                        ctx.stroke();
+
+                        if (progress >= 1) {
+                            // Trigger Click
+                            const btn = document.querySelector(`.btn-answer[data-index='${state.hoverElementId}']`);
+                            if(btn) {
+                                game.handleAnswer(parseInt(state.hoverElementId));
+                            }
+                        }
+                    }
+                }
+
+                this.loopId = requestAnimationFrame(this.renderLoop.bind(this));
+            }
+        };
+
+        function checkCollisions() {
+            if (state.motionActive || state.cursorX < 0) return;
+
+            const buttons = document.querySelectorAll('.btn-answer');
+            let isHoveringAny = false;
+
+            buttons.forEach(btn => {
+                const rect = btn.getBoundingClientRect();
+                
+                // AABB Collision check
+                if (state.cursorX >= rect.left && state.cursorX <= rect.right &&
+                    state.cursorY >= rect.top && state.cursorY <= rect.bottom) {
+                    
+                    isHoveringAny = true;
+                    const index = btn.dataset.index;
+
+                    if (state.hoverElementId !== index) {
+                        // New hover started
+                        state.hoverElementId = index;
+                        state.hoverStartTime = performance.now();
+                        btn.classList.add('hovered');
+                        audio.hover();
+                    }
+                } else {
+                    btn.classList.remove('hovered');
+                }
+            });
+
+            if (!isHoveringAny) {
+                resetHover();
+            }
+        }
+
+        function resetHover() {
+            state.hoverElementId = null;
+            document.querySelectorAll('.btn-answer').forEach(b => b.classList.remove('hovered'));
+        }
+
+        function completeMotionChallenge() {
+            audio.motion();
+            state.motionActive = false;
+            document.getElementById('motion-prompt').classList.add('hidden');
+            game.showQuestionUI();
+            
+            // Re-read question text since they were distracted
+            if (settings.voiceEnabled || settings.listeningMode) {
+                let textToSpeak = state.currentQ.q.replace('_____', 'blank');
+                audio.speakQuestion(textToSpeak);
+            }
+        }
+
+        // Global function for "Read Again" button
+        audio.speakQuestion = function(text) {
+             const t = text || state.currentQ.q.replace('_____', 'blank');
+             if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utterance = new SpeechSynthesisUtterance(t);
+                utterance.lang = 'en-US';
+                utterance.rate = 0.85;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+    </script>
+</body>
+</html>
