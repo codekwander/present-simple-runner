@@ -44,7 +44,8 @@
         <p class="text-2xl mb-12 font-bold text-blue-200 text-center px-4">AR English Grammar Game<br><span class="text-sm font-normal">Use your body to play!</span></p>
         
         <div class="flex flex-col gap-6">
-            <button class="btn" onclick="startGame('standard')">▶ START GAME</button>
+            <!-- เพิ่ม initAudio() เข้าไปใน onclick เพื่อปลดล็อคเสียงบนมือถือ -->
+            <button class="btn" onclick="initAudio(); startGame('standard')">▶ START GAME</button>
             <button class="btn btn-blue" onclick="showScreen('screen-teacher')">⚙️ TEACHER MODE</button>
             <button class="btn" style="background: linear-gradient(to bottom, #43e97b 0%, #38f9d7 100%); color: #1b5e20;" onclick="showScreen('screen-leaderboard')">🏆 LEADERBOARD</button>
         </div>
@@ -94,7 +95,8 @@
 
             <div class="mt-8 flex gap-4 w-full">
                 <button class="btn btn-blue flex-1" onclick="showScreen('screen-menu')">BACK</button>
-                <button class="btn flex-1" onclick="applySettingsAndStart()">PLAY NOW</button>
+                <!-- เพิ่ม initAudio() เพื่อปลดล็อคเสียงก่อนเริ่มจากหน้านี้ -->
+                <button class="btn flex-1" onclick="initAudio(); applySettingsAndStart()">PLAY NOW</button>
             </div>
         </div>
     </div>
@@ -139,7 +141,8 @@
             <!-- Question Bar (Middle-top) -->
             <div id="question-container" class="absolute top-32 left-1/2 transform -translate-x-1/2 w-11/12 max-w-4xl text-center">
                 <div class="glass-panel inline-block px-8 py-6 rounded-3xl shadow-2xl bg-opacity-80 bg-blue-900 border-4 border-blue-400">
-                    <h2 id="question-text" class="text-4xl md:text-5xl lg:text-6xl font-black text-white drop-shadow-md">We _____ to school.</h2>
+                    <!-- ปรับการใช้ class ของข้อความคำถามเพื่อรองรับความยาวที่หลากหลาย -->
+                    <h2 id="question-text" class="font-black text-white drop-shadow-md leading-tight break-words">We _____ to school.</h2>
                 </div>
             </div>
 
@@ -236,16 +239,14 @@
         let currentQuestion = null;
         let activeChoices = []; // Array of {text, x, y, radius, isCorrect, hoverProgress}
         let particles = [];
-        let isTransitioning = false; // ป้องกันการทำงานซ้อนทับกัน
+        let isTransitioning = false;
         
-        // Stats
         let correctTouches = 0;
         let totalAttempts = 0;
 
-        // Settings
         let config = {
             totalTime: 60,
-            mode: 'standard', // standard, listening, speed
+            mode: 'standard', 
             targetColor: '#ffeb3b',
             questionTimeLimit: 20,
             difficulty: 'all',
@@ -255,9 +256,21 @@
         let lastBonusTime = 0;
         let isBonusRound = false;
 
-        // Audio Context for synthetic sounds
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
+        // ฟังก์ชันสำคัญ! ปลดล็อคระบบเสียงบนมือถือ ต้องเรียกใช้ตอนกดปุ่มทันที
+        function initAudio() {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            if ('speechSynthesis' in window) {
+                // ให้ระบบอ่านข้อความเปล่าๆ ทันทีที่กดปุ่ม เพื่อปลดล็อคการใช้งาน SpeechSynthesis บนมือถือ
+                const silentUtterance = new SpeechSynthesisUtterance('');
+                silentUtterance.volume = 0;
+                window.speechSynthesis.speak(silentUtterance);
+            }
+        }
+
         function playSound(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
@@ -342,7 +355,6 @@
                 canvas = document.getElementById('game-canvas');
                 ctx = canvas.getContext('2d');
                 
-                // Set canvas size to match window for responsive drawing
                 resizeCanvas();
                 window.addEventListener('resize', resizeCanvas);
                 
@@ -402,7 +414,6 @@
             timeLeft--;
             document.getElementById('timer-display').innerText = timeLeft;
             
-            // Check Bonus Round (เปลี่ยนเป็นทุกๆ 30 วินาที และป้องกันการเด้งซ้อน)
             if (timeLeft > 0 && (lastBonusTime - timeLeft >= 30) && !isBonusRound && !isTransitioning) {
                 triggerBonusRound();
             }
@@ -416,23 +427,19 @@
             if(state !== 'PLAYING') return;
             isBonusRound = false;
 
-            // Filter questions by difficulty
             let availableQuestions = allQuestions;
             if (config.difficulty !== 'all') {
                 availableQuestions = allQuestions.filter(q => q.diff === config.difficulty);
-                if (availableQuestions.length === 0) availableQuestions = allQuestions; // fallback if empty
+                if (availableQuestions.length === 0) availableQuestions = allQuestions; 
             }
 
-            // ระบบป้องกันคำถามออกซ้ำกับข้อที่แล้ว
             if (availableQuestions.length > 1 && currentQuestion) {
                 availableQuestions = availableQuestions.filter(q => q.q !== currentQuestion.q);
             }
 
-            // Pick random question
             const qIndex = Math.floor(Math.random() * availableQuestions.length);
             currentQuestion = availableQuestions[qIndex];
 
-            // Setup UI
             let displayText = currentQuestion.q;
             const textToSpeak = currentQuestion.q.replace("_____", "blank");
 
@@ -448,32 +455,30 @@
             const questionTextEl = document.getElementById('question-text');
             questionTextEl.innerText = displayText;
 
-            // ปรับขนาดตัวหนังสืออัตโนมัติตามความยาวของประโยคคำถาม
+            // แก้ไขเรื่องขนาดของตัวอักษรคำถามให้เหมาะสมแบบ Responsive ยิ่งขึ้น
+            questionTextEl.className = "font-black text-white drop-shadow-md leading-tight break-words";
             if (displayText.length > 40) {
-                // ประโยคยาวมาก (Expert)
-                questionTextEl.className = "text-2xl md:text-3xl lg:text-4xl font-black text-white drop-shadow-md leading-tight";
+                // ประโยคยาวมาก
+                questionTextEl.classList.add("text-2xl", "md:text-3xl", "lg:text-4xl");
             } else if (displayText.length > 25) {
                 // ประโยคยาวปานกลาง
-                questionTextEl.className = "text-3xl md:text-4xl lg:text-5xl font-black text-white drop-shadow-md leading-tight";
+                questionTextEl.classList.add("text-3xl", "md:text-4xl", "lg:text-5xl");
             } else {
-                // ประโยคสั้น (ปกติ)
-                questionTextEl.className = "text-4xl md:text-5xl lg:text-6xl font-black text-white drop-shadow-md leading-tight";
+                // ประโยคสั้น
+                questionTextEl.classList.add("text-4xl", "md:text-5xl", "lg:text-6xl");
             }
 
-            // Generate physical choices on canvas
             activeChoices = [];
             const w = canvas.width;
             const h = canvas.height;
-            const yPos = h * 0.7; // Lower half
+            const yPos = h * 0.75; // ขยับวงกลมลงมานิดนึงเพื่อไม่ให้บังประโยคคำถามยาวๆ
             
-            // Layout: Left, Center, Right
             const positions = [
                 {x: w * 0.2, y: yPos},
                 {x: w * 0.5, y: yPos},
                 {x: w * 0.8, y: yPos}
             ];
 
-            // Shuffle choices positions
             const shuffledIndices = [0, 1, 2].sort(() => Math.random() - 0.5);
 
             for(let i = 0; i < 3; i++) {
@@ -483,7 +488,7 @@
                     text: choiceText,
                     x: pos.x,
                     y: pos.y,
-                    radius: Math.min(w * 0.12, 100), // Responsive sizing
+                    radius: Math.min(w * 0.13, 110), // เพิ่มขนาดขอบเขตสูงสุดนิดนึง
                     isCorrect: (i === currentQuestion.a),
                     hoverProgress: 0,
                     color: config.targetColor
@@ -498,7 +503,6 @@
             
             const questionTextEl = document.getElementById('question-text');
             questionTextEl.innerText = "⭐ BONUS ROUND! ⭐\nTouch 'START'";
-            // กำหนดขนาดและสีสำหรับโบนัส
             questionTextEl.className = "text-4xl md:text-5xl lg:text-6xl font-black text-yellow-300 drop-shadow-md leading-tight";
             
             activeChoices = [{
@@ -508,29 +512,24 @@
                 radius: 120,
                 isCorrect: true,
                 hoverProgress: 0,
-                color: '#ff00ff' // Special color
+                color: '#ff00ff'
             }];
         }
 
         async function gameLoop() {
             if(state !== 'PLAYING') return;
             
-            // 1. Clear & Draw setup
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
-            // 2. Get Pose
             let poses = [];
             try {
                 poses = await detector.estimatePoses(video);
             } catch(e) {}
 
-            // 3. Draw Choices
             drawChoices();
 
-            // 4. Process Poses (Hand Tracking)
             if (poses.length > 0) {
                 const keypoints = poses[0].keypoints;
-                // Focus on wrists (9, 10) or index fingers (15, 16 if available in higher models. MoveNet uses wrists well)
                 const leftWrist = keypoints[9];
                 const rightWrist = keypoints[10];
 
@@ -541,25 +540,14 @@
                 drawHands(pointsToTrack);
                 checkIntersections(pointsToTrack);
             } else {
-                // Decay hover if no hands seen
                 activeChoices.forEach(c => c.hoverProgress = Math.max(0, c.hoverProgress - 5));
             }
 
-            // 5. Draw Particles
             drawParticles();
-
             gameLoopId = requestAnimationFrame(gameLoop);
         }
 
         function mapVideoToCanvas(vidX, vidY) {
-            // Video is rendered via object-fit: cover, and mirrored via CSS.
-            // But MoveNet outputs coordinates relative to video native resolution.
-            // Because video is mirrored via CSS, MoveNet X=0 is actually right side of screen visually.
-            const scaleX = canvas.width / video.videoWidth;
-            const scaleY = canvas.height / video.videoHeight;
-            
-            // Calculate cover math (simplification for general fit)
-            // To ensure perfect mapping regardless of aspect ratio differences:
             const videoRatio = video.videoWidth / video.videoHeight;
             const windowRatio = canvas.width / canvas.height;
             
@@ -579,9 +567,6 @@
             let finalX = offsetX + (vidX * (drawWidth / video.videoWidth));
             let finalY = offsetY + (vidY * (drawHeight / video.videoHeight));
 
-            // Apply mirror inversion for X since canvas is mirrored via CSS scaleX(-1)
-            // Wait, if canvas is CSS mirrored, drawing at X=10 means it shows at right.
-            // MoveNet X=10 means left of video. So it perfectly matches naturally!
             return { x: finalX, y: finalY };
         }
 
@@ -595,7 +580,6 @@
                 ctx.fill();
                 ctx.stroke();
                 
-                // Inner glow
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, 10, 0, 2 * Math.PI);
                 ctx.fillStyle = 'white';
@@ -605,7 +589,7 @@
 
         function drawChoices() {
             activeChoices.forEach(choice => {
-                // Base Circle
+                // วาดวงกลมพื้นฐาน
                 ctx.beginPath();
                 ctx.arc(choice.x, choice.y, choice.radius, 0, 2 * Math.PI);
                 ctx.fillStyle = choice.color;
@@ -614,35 +598,62 @@
                 ctx.strokeStyle = 'white';
                 ctx.stroke();
 
-                // Hover Progress Arc (Loading ring)
+                // วงแหวนสถานะการเลือก (Loading)
                 if (choice.hoverProgress > 0) {
                     ctx.beginPath();
                     ctx.arc(choice.x, choice.y, choice.radius + 15, -0.5 * Math.PI, (-0.5 * Math.PI) + (2 * Math.PI * (choice.hoverProgress / 100)));
                     ctx.lineWidth = 10;
-                    ctx.strokeStyle = '#4ade80'; // Green loading
+                    ctx.strokeStyle = '#4ade80'; 
                     ctx.stroke();
                 }
 
-                // Text (need to mirror back because canvas is CSS mirrored scaleX(-1))
                 ctx.save();
                 ctx.translate(choice.x, choice.y);
-                ctx.scale(-1, 1); // Flip text back to readable
+                ctx.scale(-1, 1); // พลิกตัวอักษรกลับมาให้ปกติ (แก้การพลิกของกล้อง)
                 ctx.fillStyle = '#1a202c';
-                
-                // คำนวณและปรับขนาดตัวอักษรให้พอดีกับกรอบวงกลม
-                let fontSize = choice.radius * 0.5;
-                ctx.font = `bold ${fontSize}px 'Nunito'`;
-                let textWidth = ctx.measureText(choice.text).width;
-                const maxWidth = choice.radius * 1.6; // เผื่อขอบซ้ายขวา
-                
-                if (textWidth > maxWidth) {
-                    fontSize = fontSize * (maxWidth / textWidth); // ย่อขนาดลงตามสัดส่วน
-                    ctx.font = `bold ${fontSize}px 'Nunito'`;
-                }
-                
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(choice.text, 0, 0);
+                
+                // คำนวณและปรับขนาดตัวอักษรให้พอดีกับกรอบวงกลม พร้อมระบบตัดบรรทัด
+                let fontSize = choice.radius * 0.45; 
+                const maxWidth = choice.radius * 1.7; // ความกว้างที่ยอมรับได้
+                
+                const words = choice.text.split(' ');
+                
+                if (words.length > 1) {
+                    // หากมีหลายคำ แบ่งเป็น 2 บรรทัด
+                    let midIndex = Math.ceil(words.length / 2);
+                    let line1 = words.slice(0, midIndex).join(' ');
+                    let line2 = words.slice(midIndex).join(' ');
+                    
+                    ctx.font = `bold ${fontSize * 0.8}px 'Nunito'`; // เล็กลงนิดนึงสำหรับ 2 บรรทัด
+                    let w1 = ctx.measureText(line1).width;
+                    let w2 = ctx.measureText(line2).width;
+                    let maxW = Math.max(w1, w2);
+                    
+                    if (maxW > maxWidth) {
+                        // ถ้ายาวเกินกรอบ ก็ทำการย่อสัดส่วนอีก
+                        let scale = maxWidth / maxW;
+                        ctx.font = `bold ${fontSize * 0.8 * scale}px 'Nunito'`;
+                    }
+                    
+                    // วาดข้อความ 2 บรรทัด
+                    ctx.fillText(line1, 0, -fontSize * 0.4);
+                    ctx.fillText(line2, 0, fontSize * 0.4);
+                } else {
+                    // หากมีคำเดียว
+                    ctx.font = `bold ${fontSize}px 'Nunito'`;
+                    let textWidth = ctx.measureText(choice.text).width;
+                    
+                    if (textWidth > maxWidth) {
+                        // ถ้ายาวเกิน ก็ย่อลงตามสัดส่วน
+                        let scale = maxWidth / textWidth;
+                        ctx.font = `bold ${fontSize * scale}px 'Nunito'`;
+                    }
+                    
+                    ctx.fillText(choice.text, 0, 0);
+                }
+                
                 ctx.restore();
             });
         }
@@ -660,10 +671,10 @@
                 });
 
                 if (isHovered) {
-                    choice.hoverProgress += 4; // Takes about ~25 frames (0.5s) to select
+                    choice.hoverProgress += 4; 
                     if (choice.hoverProgress >= 100) {
                         handleSelection(choice);
-                        choice.hoverProgress = 0; // reset to prevent double trigger
+                        choice.hoverProgress = 0;
                     }
                 } else {
                     choice.hoverProgress = Math.max(0, choice.hoverProgress - 5);
@@ -672,18 +683,18 @@
         }
 
         function handleSelection(choice) {
-            if (isTransitioning) return; // ป้องกันการเลือกซ้ำตอนที่กำลังจะเปลี่ยนข้อ
+            if (isTransitioning) return; 
             isTransitioning = true;
 
             totalAttempts++;
             if (choice.isCorrect) {
                 correctTouches++;
-                let points = isBonusRound ? 50 : 100; // Multiply by 10 for game feel (10 -> 100, bonus 50 -> 500)
+                let points = isBonusRound ? 50 : 10; 
                 if(config.mode === 'speed') points *= 2;
                 
-                score += (isBonusRound ? 50 : 10);
+                score += points;
                 playSound('correct');
-                showFeedback(`CORRECT! +${isBonusRound ? 50 : 10}`, '#4ade80');
+                showFeedback(`CORRECT! +${points}`, '#4ade80');
                 createExplosion(choice.x, choice.y, '#4ade80');
                 
                 if(isBonusRound) {
@@ -698,7 +709,6 @@
             
             updateScoreUI();
             
-            // Clear choices briefly before next
             activeChoices = [];
             setTimeout(() => {
                 isTransitioning = false;
@@ -711,7 +721,7 @@
             fb.innerText = text;
             fb.style.color = color;
             fb.classList.remove('feedback-anim');
-            void fb.offsetWidth; // trigger reflow
+            void fb.offsetWidth; 
             fb.classList.add('feedback-anim');
         }
 
@@ -719,7 +729,6 @@
             document.getElementById('score-display').innerText = score;
         }
 
-        // Particle System for visual feedback
         function createExplosion(x, y, color) {
             for(let i=0; i<30; i++) {
                 particles.push({
@@ -780,7 +789,6 @@
                 date: new Date().toLocaleDateString()
             });
             
-            // Sort by score desc, keep top 10
             lb.sort((a, b) => b.score - a.score);
             lb = lb.slice(0, 10);
             localStorage.setItem('ps_runner_lb', JSON.stringify(lb));
@@ -819,11 +827,8 @@
             });
         }
 
-        // Handle visibility change to pause/resume
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden && state === 'PLAYING') {
-                // In a real app, maybe show a pause screen. Here we just let it run or freeze via rAF.
-            }
+            // Placeholder for pause state on visibility change
         });
     </script>
 </body>
