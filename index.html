@@ -45,7 +45,7 @@
         
         <div class="flex flex-col gap-6">
             <!-- เพิ่ม initAudio() เข้าไปใน onclick เพื่อปลดล็อคเสียงบนมือถือ -->
-            <button class="btn" onclick="initAudio(); startGame('standard')">▶ START GAME</button>
+            <button class="btn" onclick="initAudioAndStart('standard')">▶ START GAME</button>
             <button class="btn btn-blue" onclick="showScreen('screen-teacher')">⚙️ TEACHER MODE</button>
             <button class="btn" style="background: linear-gradient(to bottom, #43e97b 0%, #38f9d7 100%); color: #1b5e20;" onclick="showScreen('screen-leaderboard')">🏆 LEADERBOARD</button>
         </div>
@@ -96,7 +96,7 @@
             <div class="mt-8 flex gap-4 w-full">
                 <button class="btn btn-blue flex-1" onclick="showScreen('screen-menu')">BACK</button>
                 <!-- เพิ่ม initAudio() เพื่อปลดล็อคเสียงก่อนเริ่มจากหน้านี้ -->
-                <button class="btn flex-1" onclick="initAudio(); applySettingsAndStart()">PLAY NOW</button>
+                <button class="btn flex-1" onclick="initAudioAndApplySettings()">PLAY NOW</button>
             </div>
         </div>
     </div>
@@ -256,22 +256,89 @@
         let lastBonusTime = 0;
         let isBonusRound = false;
 
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // เปลี่ยนวิธีการประกาศ AudioContext เป็นแบบ Lazy Initialization
+        let audioCtx;
+        let audioInitialized = false;
         
         // ฟังก์ชันสำคัญ! ปลดล็อคระบบเสียงบนมือถือ ต้องเรียกใช้ตอนกดปุ่มทันที
         function initAudio() {
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-            if ('speechSynthesis' in window) {
-                // ให้ระบบอ่านข้อความเปล่าๆ ทันทีที่กดปุ่ม เพื่อปลดล็อคการใช้งาน SpeechSynthesis บนมือถือ
-                const silentUtterance = new SpeechSynthesisUtterance('');
-                silentUtterance.volume = 0;
-                window.speechSynthesis.speak(silentUtterance);
-            }
+            if (audioInitialized) return Promise.resolve();
+
+            return new Promise((resolve) => {
+                // สร้าง AudioContext เมื่อมีการกดปุ่ม
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!audioCtx) {
+                    audioCtx = new AudioContext();
+                }
+
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                // สร้างเสียงเงียบสั้นๆ เพื่อปลดล็อค iOS Audio
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                gain.gain.value = 0; // ปิดเสียง
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start(0);
+                osc.stop(audioCtx.currentTime + 0.1);
+
+                // ปลดล็อค SpeechSynthesis
+                if ('speechSynthesis' in window) {
+                    const silentUtterance = new SpeechSynthesisUtterance(' ');
+                    silentUtterance.volume = 0; // เสียงเบาสุด
+                    silentUtterance.rate = 10; // พูดเร็วสุดจะได้จบไวๆ
+                    
+                    silentUtterance.onend = () => {
+                        audioInitialized = true;
+                        resolve();
+                    };
+                    
+                    silentUtterance.onerror = () => {
+                        // แม้จะ error ก็ถือว่าพยายามแล้ว ให้ไปต่อ
+                        audioInitialized = true;
+                        resolve();
+                    };
+
+                    window.speechSynthesis.cancel(); // ยกเลิกคิวเก่าๆ ก่อน
+                    window.speechSynthesis.speak(silentUtterance);
+                    
+                    // สำรองเผื่อ onend ไม่ทำงาน
+                    setTimeout(() => {
+                        if (!audioInitialized) {
+                            audioInitialized = true;
+                            resolve();
+                        }
+                    }, 500);
+                } else {
+                    audioInitialized = true;
+                    resolve();
+                }
+            });
+        }
+
+        // ฟังก์ชันช่วยเหลือสำหรับตอนกดปุ่ม Start
+        async function initAudioAndStart(mode) {
+            // แสดงสถานะโหลดนิดนึงระหว่างรอเสียงปลดล็อค (ถ้ามันช้า)
+            const btn = event.currentTarget;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = "LOADING...";
+            
+            await initAudio();
+            
+            btn.innerHTML = originalText;
+            startGame(mode);
+        }
+
+        // ฟังก์ชันช่วยเหลือสำหรับตอนกดปุ่ม Play Now ในหน้า Teacher
+        async function initAudioAndApplySettings() {
+            await initAudio();
+            applySettingsAndStart();
         }
 
         function playSound(type) {
+            if (!audioCtx) return; // ถ้าไม่มี audioCtx (ยังไม่ได้กดปุ่ม) ไม่ต้องทำอะไร
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
